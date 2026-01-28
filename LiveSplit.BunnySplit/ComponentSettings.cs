@@ -1,13 +1,14 @@
-﻿using System;
+﻿using LiveSplit.UI;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Drawing;
 using System.Data;
+using System.Drawing;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
 using System.Xml;
-using System.Reflection;
 
 namespace LiveSplit.BunnySplit
 {
@@ -64,6 +65,22 @@ namespace LiveSplit.BunnySplit
             "rebar0a",      // Rebar
             "end1",         // End
         };
+
+        public Color BackgroundColor { get; set; }
+        public Color BackgroundColor2 { get; set; }
+        public GradientType BackgroundGradient { get; set; }
+        public string GradientString
+        {
+            get { return BackgroundGradient.ToString(); }
+            set { BackgroundGradient = (GradientType)Enum.Parse(typeof(GradientType), value); }
+        }
+
+        public bool OverrideChanceColor { get; set; }
+        public Color TextColor { get; set; }
+        public bool OverrideTextColor { get; set; }
+        public Color ChanceColor { get; set; }
+
+        public bool Display2Rows { get; set; }
 
         public ComponentSettings()
         {

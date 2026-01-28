@@ -2,8 +2,6 @@
 using System.Xml;
 
 using LiveSplit.Model;
-using LiveSplit.UI;
-using LiveSplit.UI.Components;
 using System.IO.Pipes;
 using System;
 using System.Diagnostics;
@@ -11,12 +9,17 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using LiveSplit.UI.Components;
+using LiveSplit.UI;
 
 namespace LiveSplit.BunnySplit
 {
-    class Component : LogicComponent
+    class Component : IComponent
     {
-        public override string ComponentName => "BunnySplit";
+        public string ComponentName => "BunnySplit";
+        protected InfoTextComponent InternalComponent { get; set; }
 
         private const string PIPE_NAME = "BunnymodXT-BunnySplit";
         private enum MessageType : byte
@@ -59,6 +62,17 @@ namespace LiveSplit.BunnySplit
             public TimeSpan Time { get; set; }
         }
 
+        public float HorizontalWidth => InternalComponent.HorizontalWidth;
+        public float MinimumWidth => InternalComponent.MinimumWidth;
+        public float VerticalHeight => InternalComponent.VerticalHeight;
+        public float MinimumHeight => InternalComponent.MinimumHeight;
+
+        public float PaddingTop => InternalComponent.PaddingTop;
+        public float PaddingLeft => InternalComponent.PaddingLeft;
+        public float PaddingBottom => InternalComponent.PaddingBottom;
+        public float PaddingRight => InternalComponent.PaddingRight;
+
+        public IDictionary<string, Action> ContextMenuControls => null;
         private ComponentSettings settings = new ComponentSettings();
         private NamedPipeClientStream pipe = new NamedPipeClientStream(
             ".",
@@ -71,7 +85,7 @@ namespace LiveSplit.BunnySplit
         private Thread pipeThread;
         private TimerModel model;
         private TimeSpan currentTime = new TimeSpan();
-        private object currentTimeLock = new object();
+        private TimeSpan? SumofBestValue { get; set; }
         private List<IEvent> events = new List<IEvent>();
         private object eventsLock = new object();
         private HashSet<string> visitedMaps = new HashSet<string>();
@@ -86,30 +100,32 @@ namespace LiveSplit.BunnySplit
             model.InitializeGameTime();
             pipeThread = new Thread(PipeThreadFunc);
             pipeThread.Start();
+
+            InternalComponent = new InfoTextComponent("Chapter Sum of Best", "0:00");
         }
 
-        public override void Dispose()
+        public void Dispose()
         {
             cts.Cancel();
             pipeThread.Join();
         }
 
-        public override XmlNode GetSettings(XmlDocument document)
+        public XmlNode GetSettings(XmlDocument document)
         {
             return settings.GetSettings(document);
         }
 
-        public override Control GetSettingsControl(LayoutMode mode)
+        public Control GetSettingsControl(LayoutMode mode)
         {
             return settings;
         }
 
-        public override void SetSettings(XmlNode settings)
+        public void SetSettings(XmlNode settings)
         {
             this.settings.SetSettings(settings);
         }
 
-        public override void Update(IInvalidator invalidator, LiveSplitState state, float width, float height, LayoutMode mode)
+        public void Update(IInvalidator invalidator, LiveSplitState state, float width, float height, LayoutMode mode)
         {
             state.IsGameTimePaused = true;
             
@@ -359,6 +375,56 @@ namespace LiveSplit.BunnySplit
                     continue;
                 }
             }
+        }
+
+        // Component graphics, taken from https://github.com/TheSoundDefense/LiveSplit.ResetChance/blob/master/UI/Components/ResetChanceComponent.cs
+        private void DrawBackground(Graphics g, LiveSplitState state, float width, float height)
+        {
+            if (settings.BackgroundColor.A > 0
+                || settings.BackgroundGradient != GradientType.Plain
+                && settings.BackgroundColor2.A > 0)
+            {
+                var gradientBrush = new LinearGradientBrush(
+                            new PointF(0, 0),
+                            settings.BackgroundGradient == GradientType.Horizontal
+                            ? new PointF(width, 0)
+                            : new PointF(0, height),
+                            settings.BackgroundColor,
+                            settings.BackgroundGradient == GradientType.Plain
+                            ? settings.BackgroundColor
+                            : settings.BackgroundColor2);
+                g.FillRectangle(gradientBrush, 0, 0, width, height);
+            }
+        }
+
+        public void DrawHorizontal(Graphics g, LiveSplitState state, float height, Region clipRegion)
+        {
+            DrawBackground(g, state, HorizontalWidth, height);
+
+            InternalComponent.NameLabel.HasShadow
+                = InternalComponent.ValueLabel.HasShadow
+                = state.LayoutSettings.DropShadows;
+
+            InternalComponent.NameLabel.ForeColor = settings.OverrideTextColor ? settings.TextColor : state.LayoutSettings.TextColor;
+            InternalComponent.ValueLabel.ForeColor = settings.OverrideChanceColor ? settings.ChanceColor : state.LayoutSettings.TextColor;
+
+            InternalComponent.DrawHorizontal(g, state, height, clipRegion);
+        }
+
+        public void DrawVertical(Graphics g, LiveSplitState state, float width, Region clipRegion)
+        {
+            DrawBackground(g, state, width, VerticalHeight);
+
+            InternalComponent.DisplayTwoRows = settings.Display2Rows;
+
+            InternalComponent.NameLabel.HasShadow
+                = InternalComponent.ValueLabel.HasShadow
+                = state.LayoutSettings.DropShadows;
+
+            InternalComponent.NameLabel.ForeColor = settings.OverrideTextColor ? settings.TextColor : state.LayoutSettings.TextColor;
+            InternalComponent.ValueLabel.ForeColor = settings.OverrideChanceColor ? settings.ChanceColor : state.LayoutSettings.TextColor;
+
+            InternalComponent.DrawVertical(g, state, width, clipRegion);
         }
     }
 }
