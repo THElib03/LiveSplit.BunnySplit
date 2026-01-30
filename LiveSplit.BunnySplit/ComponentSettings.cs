@@ -34,6 +34,27 @@ namespace LiveSplit.BunnySplit
             "c4a3"      // Nihilanth
         };
 
+        private readonly List<string> hl1_chapters = new List<string>
+        {
+            "Anomalous Materials",
+            "Unforeseen Consequences",
+            "Office Complex",
+            "We've Got Hostiles",
+            "Blast Pit",
+            "Power Up",
+            "On a Rail",
+            "Apprehension",
+            "Residue Processing",
+            "Questionable Ethics",
+            "Surface Tension",
+            "Forget About Freeman",
+            "Lambda Core",
+            "Xen",
+            "Gonarch's Lair",
+            "Interloper",
+            "Nihilanth"
+        };
+
         private readonly List<string> op4_chapter_maps = new List<string>
         {
             "of1a5",    // We Are Pulling Out
@@ -48,6 +69,21 @@ namespace LiveSplit.BunnySplit
             "of6a4b"    // Worlds Collide
         };
 
+        private readonly List<string> op4_chapters = new List<string>
+        {
+            "Welcome to Black Mesa",
+            "We Are Pulling Out",
+            "Missing in Action",
+            "Friendly Fire",
+            "We Are Not Alone",
+            "Crush Depth",
+            "Vicarious Reality",
+            "Pit Worm's Nest",
+            "Foxtrot Uniform",
+            "The Package",
+            "Worlds Collide"
+        };
+
         private readonly List<string> bs_chapter_maps = new List<string>
         {
             "ba_canal1",    // Duty Calls
@@ -57,6 +93,16 @@ namespace LiveSplit.BunnySplit
             // A Leap of Faith has special handling.
         };
 
+        private readonly List<string> bs_chapters = new List<string>
+        {
+            "Insecurity",
+            "Duty Calls",
+            "Captive Freight",
+            "Focal Point",
+            "Power Struggle",
+            "A Leap of Faith"
+        };
+
         private readonly List<string> gmc_chapter_maps = new List<string>
         {
             "mayan0a",      // Mayan
@@ -64,6 +110,15 @@ namespace LiveSplit.BunnySplit
             "cinematic3",   // Cinematic
             "rebar0a",      // Rebar
             "end1",         // End
+        };
+
+        private readonly List<string> gmc_chapters = new List<string>
+        {
+            "Mayan",
+            "Cinematic",
+            "Cinematic",
+            "Rebar",
+            "End"
         };
 
         public Color BackgroundColor { get; set; }
@@ -136,8 +191,7 @@ namespace LiveSplit.BunnySplit
             if (element == null)
                 return previous;
 
-            bool b;
-            if (bool.TryParse(element.InnerText, out b))
+            if (bool.TryParse(element.InnerText, out bool b))
                 return b;
 
             return previous;
@@ -151,8 +205,7 @@ namespace LiveSplit.BunnySplit
             var versionElement = settings["Version"];
             if (versionElement == null)
                 return;
-            Version ver;
-            if (!Version.TryParse(versionElement.InnerText, out ver))
+            if (!Version.TryParse(versionElement.InnerText, out Version ver))
                 return;
             if (ver.Major != 2 || ver.Minor != 0)
                 return;
@@ -190,6 +243,21 @@ namespace LiveSplit.BunnySplit
                 return true;
 
             if (SplitOnMapsCheckbox.Checked && SplitOnMapsList.GetValues().Contains(map))
+                return true;
+
+            return false;
+        }
+
+        //Incredibly stupid to repeat the code but i need to check only chapter changes
+        public bool ShouldSplitChapter(string map)
+        {
+            if (SplitOnHL1ChaptersCheckbox.Checked && hl1_chapter_maps.Contains(map))
+                return true;
+            if (SplitOnOP4ChaptersCheckbox.Checked && op4_chapter_maps.Contains(map))
+                return true;
+            if (SplitOnBSChaptersCheckbox.Checked && bs_chapter_maps.Contains(map))
+                return true;
+            if (SplitOnGMCChaptersCheckbox.Checked && gmc_chapter_maps.Contains(map))
                 return true;
 
             return false;
@@ -240,6 +308,38 @@ namespace LiveSplit.BunnySplit
         private void EnableAutoSplitCheckbox_CheckedChanged(object sender, EventArgs e)
         {
             SetAutoSplitCheckboxColors();
+        }
+
+        public List<string> GetNextChapters(int currChapter)
+        {
+            return new List<string> { hl1_chapter_maps[currChapter], op4_chapter_maps[currChapter], bs_chapter_maps[currChapter], gmc_chapter_maps[currChapter], };
+        }
+
+        public string GetChapterName(string map)
+        {
+            int chapterIndex = 0;
+            if (SplitOnHL1ChaptersCheckbox.Checked && hl1_chapter_maps.Contains(map))
+            {
+                chapterIndex = hl1_chapter_maps.FindIndex(chapter => chapter == map) + 1;
+                return hl1_chapters[chapterIndex];
+            }
+            if (SplitOnOP4ChaptersCheckbox.Checked && op4_chapter_maps.Contains(map))
+            {
+                chapterIndex = op4_chapter_maps.FindIndex(chapter => chapter == map) + 1;
+                return op4_chapters[chapterIndex];
+            }
+            if (SplitOnBSChaptersCheckbox.Checked && bs_chapter_maps.Contains(map))
+            {
+                chapterIndex = bs_chapter_maps.FindIndex(chapter => chapter == map) + 1;
+                return bs_chapters[chapterIndex];
+            }
+            if (SplitOnGMCChaptersCheckbox.Checked && gmc_chapter_maps.Contains(map))
+            {
+                chapterIndex = gmc_chapter_maps.FindIndex(chapter => chapter == map) + 1;
+                return gmc_chapters[chapterIndex];
+            }
+
+            return "Chapter SoB";
         }
     }
 }

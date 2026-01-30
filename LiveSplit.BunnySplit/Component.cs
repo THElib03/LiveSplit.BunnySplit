@@ -1,25 +1,27 @@
-﻿using System.Windows.Forms;
-using System.Xml;
-
-using LiveSplit.Model;
-using System.IO.Pipes;
+﻿using LiveSplit.Model;
+using LiveSplit.TimeFormatters;
+using LiveSplit.UI;
+using LiveSplit.UI.Components;
 using System;
-using System.Diagnostics;
-using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using LiveSplit.UI.Components;
-using LiveSplit.UI;
+using System.IO;
+using System.IO.Pipes;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using System.Xml;
 
 namespace LiveSplit.BunnySplit
 {
     class Component : IComponent
     {
         public string ComponentName => "BunnySplit";
-        protected InfoTextComponent InternalComponent { get; set; }
+        protected InfoTimeComponent InternalComponent { get; set; }
+        protected LiveSplitState CurrentState { get; set; }
 
         private const string PIPE_NAME = "BunnymodXT-BunnySplit";
         private enum MessageType : byte
@@ -72,6 +74,7 @@ namespace LiveSplit.BunnySplit
         public float PaddingBottom => InternalComponent.PaddingBottom;
         public float PaddingRight => InternalComponent.PaddingRight;
 
+        private SplitTimeFormatter Formatter { get; set; }
         public IDictionary<string, Action> ContextMenuControls => null;
         private ComponentSettings settings = new ComponentSettings();
         private NamedPipeClientStream pipe = new NamedPipeClientStream(
@@ -84,24 +87,43 @@ namespace LiveSplit.BunnySplit
         private CancellationTokenSource cts = new CancellationTokenSource();
         private Thread pipeThread;
         private TimerModel model;
-        private TimeSpan currentTime = new TimeSpan();
-        private TimeSpan? SumofBestValue { get; set; }
         private List<IEvent> events = new List<IEvent>();
         private object eventsLock = new object();
         private HashSet<string> visitedMaps = new HashSet<string>();
+        
+        
         private bool splitOnBSALeapOfFaith = false;
 
-        private DateTime lastTime = DateTime.Now;
+
+        private int currentChapter = 0;
+        private int currentChapterIndex = 0;
+        private string currentChapterName = "Current chapter SoB";
+        private IEnumerable<ISegment> SegmentPool { get; set; }
+        private TimeSpan currentTime = new TimeSpan();
+        private object currentTimeLock = new object();
+        private TimeSpan? SumofBestValue { get; set; }
+        protected bool PreviousCalculationMode { get; set; }
+        protected TimingMethod PreviousTimingMethod { get; set; }
 
         public Component(LiveSplitState state)
         {
+            Formatter = new SplitTimeFormatter();
+            InternalComponent = new InfoTimeComponent("Chapter Sum of Best", null, Formatter)
+            {
+                AlternateNameText = new String[] { "Chapter SoB", "SoB" }
+            };
+
             state.OnStart += OnStart;
+            state.OnSplit += State_OnSplit;
+            state.OnUndoSplit += State_OnUndoSplit;
+            CurrentState = state;
+            CurrentState.RunManuallyModified += CurrentState_RunModified;
+            UpdateChapter(state, "");
+
             model = new TimerModel() { CurrentState = state };
             model.InitializeGameTime();
             pipeThread = new Thread(PipeThreadFunc);
             pipeThread.Start();
-
-            InternalComponent = new InfoTextComponent("Chapter Sum of Best", "0:00");
         }
 
         public void Dispose()
@@ -145,10 +167,18 @@ namespace LiveSplit.BunnySplit
                     else if (ev is MapChangeEvent)
                     {
                         var e = (MapChangeEvent)ev;
-                        if (visitedMaps.Add(e.Map) && settings.ShouldSplitOn(e.Map))
+                        Debug.WriteLine($"ShouldSplitOn('{e.Map}'): {settings.ShouldSplitOn(e.Map)}");
+
+                        if (visitedMaps.Add(e.Map))
                         {
+                            Debug.WriteLine("new map");
                             state.SetGameTime(e.Time);
                             model.Split();
+                        }
+
+                        if (settings.ShouldSplitChapter(e.Map))
+                        {
+                            UpdateChapter(state, e.Map);
                         }
                     }
                     else if (ev is TimerResetEvent)
@@ -157,6 +187,8 @@ namespace LiveSplit.BunnySplit
                         {
                             state.SetGameTime(ev.Time);
                             model.Reset();
+
+                            currentChapter = 0;
                         }
                     }
                     else if (ev is TimerStartEvent)
@@ -165,6 +197,9 @@ namespace LiveSplit.BunnySplit
                         {
                             state.SetGameTime(ev.Time);
                             start = true;
+
+                            UpdateChapter(state, "");
+                            currentChapter--;
                         }
                     }
                     else if (ev is BS_ALeapOfFaithEvent)
@@ -179,6 +214,11 @@ namespace LiveSplit.BunnySplit
                 }
                 events.Clear();
             }
+
+            InternalComponent.TimeValue = SumofBestValue;
+            InternalComponent.InformationName = currentChapterName;
+            InternalComponent.Update(invalidator, state, width, height, mode);
+
             if (start)
                 model.Start();
 
@@ -375,6 +415,66 @@ namespace LiveSplit.BunnySplit
                     continue;
                 }
             }
+        }
+
+        // Sum of Best calculations, based on https://github.com/LiveSplit/LiveSplit.SumOfBest/blob/master/src/LiveSplit.SumOfBest/UI/Components/SumOfBestComponent.cs
+        private void UpdateChapter(LiveSplitState state, string map)
+        {
+            int nextChapter = 0;
+            List<string> nextChapters = settings.GetNextChapters(currentChapter);
+
+            foreach (var segment in state.Run)
+            {
+                if (nextChapters.Contains(segment.Name)) { break; }
+                nextChapter++;
+            }
+
+            SegmentPool = state.Run.Skip(currentChapter).Take((nextChapter - 1) - currentChapter + 1);
+            currentChapterName = settings.GetChapterName(map);
+
+            UpdateSumOfBestValue(state);
+            currentChapter++;
+        }
+
+        private void UpdateSumOfBestValue(LiveSplitState state)
+        {
+            TimeSpan? sobTime = TimeSpan.Zero;
+            var predictions = new TimeSpan?[state.Run.Count + 1];
+            predictions[currentChapterIndex] = TimeSpan.Zero;
+
+            if (SegmentPool != null)
+            {
+                foreach (ISegment segment in SegmentPool)
+                {
+                    if (segment?.BestSegmentTime.RealTime != null)
+                    {
+                        var segmentTime = segment.BestSegmentTime.RealTime;
+                        if (segmentTime.HasValue)
+                        {
+                            sobTime += segmentTime.Value;
+                        }
+                    }
+                }
+            }
+
+            SumofBestValue = sobTime;
+            PreviousCalculationMode = state.Settings.SimpleSumOfBest;
+            PreviousTimingMethod = state.CurrentTimingMethod;
+        }
+
+        private void State_OnUndoSplit(object sender, EventArgs e)
+        {
+            UpdateSumOfBestValue((LiveSplitState)sender);
+        }
+
+        private void State_OnSplit(object sender, EventArgs e)
+        {
+            UpdateSumOfBestValue((LiveSplitState)sender);
+        }
+
+        private void CurrentState_RunModified(object sender, EventArgs e)
+        {
+            UpdateSumOfBestValue(CurrentState);
         }
 
         // Component graphics, taken from https://github.com/TheSoundDefense/LiveSplit.ResetChance/blob/master/UI/Components/ResetChanceComponent.cs
